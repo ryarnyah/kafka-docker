@@ -10,8 +10,9 @@ fi
 # Store original IFS config, so we can restore it at various stages
 ORIG_IFS=$IFS
 
-if [[ -z "$KAFKA_ZOOKEEPER_CONNECT" ]]; then
-    echo "ERROR: missing mandatory config: KAFKA_ZOOKEEPER_CONNECT"
+if [[ -z "$KAFKA_ZOOKEEPER_CONNECT" && \
+      -z "$KAFKA_CONNECT" ]]; then
+    echo "ERROR: missing mandatory configs: KAFKA_ZOOKEEPER_CONNECT or KAFKA_CONNECT"
     exit 1
 fi
 
@@ -35,8 +36,18 @@ if [[ -z "$KAFKA_BROKER_ID" ]]; then
         KAFKA_BROKER_ID=$(eval "$BROKER_ID_COMMAND")
         export KAFKA_BROKER_ID
     else
-        # By default auto allocate broker ID
-        export KAFKA_BROKER_ID=-1
+        # By default broker ID == 1
+        export KAFKA_BROKER_ID=1
+    fi
+fi
+
+if [[ -z "$KAFKA_NODE_ID" ]]; then
+    if [[ -n "$NODE_ID_COMMAND" ]]; then
+        KAFKA_NODE_ID=$(eval "$NODE_ID_COMMAND")
+        export KAFKA_NODE_ID
+    else
+        # By default node ID == 1
+        export KAFKA_NODE_ID=1
     fi
 fi
 
@@ -110,7 +121,7 @@ echo "" >> "$KAFKA_HOME/config/server.properties"
 
         # If config exists in file, replace it. Otherwise, append to file.
         if grep -E -q "^#?$key=" "$file"; then
-            sed -r -i "s@^#?$key=.*@$key=$value@g" "$file" #note that no config values may contain an '@' char
+            sed -r -i "s|^#?$key=.*|$key=$value|g" "$file" #note that no config values may contain an '@' char
         else
             echo "$key=$value" >> "$file"
         fi
@@ -144,6 +155,15 @@ echo "" >> "$KAFKA_HOME/config/server.properties"
 
 if [[ -n "$CUSTOM_INIT_SCRIPT" ]] ; then
   eval "$CUSTOM_INIT_SCRIPT"
+fi
+
+if [[ ! -z "$KAFKA_PROCESS_ROLES" ]]; then
+    [[ -f "${KAFKA_LOG_DIRS}/meta.properties" ]] || {
+        if [[ -z "$KAFKA_CLUSTER_ID" ]]; then
+            KAFKA_CLUSTER_ID=$(kafka-storage.sh random-uuid)
+        fi
+        kafka-storage.sh format --cluster-id "${KAFKA_CLUSTER_ID}" -c "$KAFKA_HOME/config/server.properties"
+    }
 fi
 
 exec "$KAFKA_HOME/bin/kafka-server-start.sh" "$KAFKA_HOME/config/server.properties"
